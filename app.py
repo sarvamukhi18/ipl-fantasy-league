@@ -8,18 +8,26 @@ st.title("🏏 IPL Betting Dashboard")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Read data
+# 1. Read data
 matches_df = conn.read(worksheet="Matches", ttl="5m")
 leaderboard_df = conn.read(worksheet="Leaderboard", ttl=0)
 bets_df = conn.read(worksheet="Bets", ttl=0)
 
+# Try to load a player list for the MOTM search
+try:
+    all_players_df = conn.read(worksheet="Players", ttl="1h")
+    player_list = sorted(all_players_df['Name'].tolist())
+except:
+    # Fallback if you haven't created a 'Players' tab yet
+    player_list = ["Virat Kohli", "MS Dhoni", "Rohit Sharma", "Shubman Gill", "Rashid Khan", "Other"]
+
 # --- SIDEBAR: Submit a Bet ---
 st.sidebar.header("Submit Your Prediction")
 
-# 1. Searchable Player List
+# User Selection
 player = st.sidebar.selectbox("Who are you?", ["S", "G", "T", "Shy", "Y", "D", "A"])
 
-# 2. Match Selection (OUTSIDE the form for instant team updates)
+# Match Selection
 upcoming_df = matches_df[matches_df['Winner'].isna()].copy()
 upcoming_df['display_name'] = "Match " + upcoming_df['MatchID'].astype(str) + ": " + upcoming_df['Team 1'] + " vs " + upcoming_df['Team 2']
 
@@ -32,15 +40,17 @@ if not todays_match_row.empty:
 
 selected_display = st.sidebar.selectbox("Select Match", upcoming_df['display_name'].tolist(), index=default_index)
 
-# Get the info for the currently selected match
 match_id = upcoming_df[upcoming_df['display_name'] == selected_display]['MatchID'].values[0]
 match_info = matches_df[matches_df['MatchID'] == match_id].iloc[0]
 
-# 3. Betting Details (Inside the form)
+# --- BETTING FORM ---
 with st.sidebar.form("bet_form"):
-    pred_team = st.radio(f"Who will win {match_info['Team 1']} vs {match_info['Team 2']}?", [match_info['Team 1'], match_info['Team 2']])
+    pred_team = st.radio(f"Who will win?", [match_info['Team 1'], match_info['Team 2']])
+    
     multiplier = st.selectbox("Multiplier", [1, 2, 3])
-    pred_motm = st.text_input("Predicted MOTM")
+    
+    # NEW: Searchable MOTM List
+    pred_motm = st.selectbox("Predicted MOTM (Type to search)", player_list)
     
     submit = st.form_submit_button("Submit Bet")
 
