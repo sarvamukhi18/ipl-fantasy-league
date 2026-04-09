@@ -15,36 +15,31 @@ bets_df = conn.read(worksheet="Bets", ttl=0)
 
 # --- SIDEBAR: Submit a Bet ---
 st.sidebar.header("Submit Your Prediction")
-with st.sidebar.form("bet_form"):
-    # 1. Searchable Player List
-    player = st.selectbox("Who are you?", ["S", "G", "T", "Shy", "Y", "D", "A"])
-    
-    # 2. Match Detection Logic
-    upcoming_df = matches_df[matches_df['Winner'].isna()].copy()
-    
-    # Create a nice label for the dropdown
-    upcoming_df['display_name'] = "Match " + upcoming_df['MatchID'].astype(str) + ": " + upcoming_df['Team 1'] + " vs " + upcoming_df['Team 2']
-    
-    # Auto-select match based on today's date
-    today_str = datetime.now().strftime("%d-%m-%Y")
-    todays_match_row = upcoming_df[upcoming_df['Date'] == today_str]
-    
-    default_index = 0
-    if not todays_match_row.empty:
-        default_index = upcoming_df.index.get_loc(todays_match_row.index[0])
 
-    selected_display = st.selectbox("Select Match", upcoming_df['display_name'].tolist(), index=default_index)
-    
-    # Get the actual MatchID from the selection
-    match_id = upcoming_df[upcoming_df['display_name'] == selected_display]['MatchID'].values[0]
-    match_info = matches_df[matches_df['MatchID'] == match_id].iloc[0]
-    
-    # 3. Predictions
-    pred_team = st.radio("Who will win?", [match_info['Team 1'], match_info['Team 2']])
-    
-    # 4. Limited Multiplier
+# 1. Searchable Player List
+player = st.sidebar.selectbox("Who are you?", ["S", "G", "T", "Shy", "Y", "D", "A"])
+
+# 2. Match Selection (OUTSIDE the form for instant team updates)
+upcoming_df = matches_df[matches_df['Winner'].isna()].copy()
+upcoming_df['display_name'] = "Match " + upcoming_df['MatchID'].astype(str) + ": " + upcoming_df['Team 1'] + " vs " + upcoming_df['Team 2']
+
+today_str = datetime.now().strftime("%d-%m-%Y")
+todays_match_row = upcoming_df[upcoming_df['Date'] == today_str]
+
+default_index = 0
+if not todays_match_row.empty:
+    default_index = upcoming_df.index.get_loc(todays_match_row.index[0])
+
+selected_display = st.sidebar.selectbox("Select Match", upcoming_df['display_name'].tolist(), index=default_index)
+
+# Get the info for the currently selected match
+match_id = upcoming_df[upcoming_df['display_name'] == selected_display]['MatchID'].values[0]
+match_info = matches_df[matches_df['MatchID'] == match_id].iloc[0]
+
+# 3. Betting Details (Inside the form)
+with st.sidebar.form("bet_form"):
+    pred_team = st.radio(f"Who will win {match_info['Team 1']} vs {match_info['Team 2']}?", [match_info['Team 1'], match_info['Team 2']])
     multiplier = st.selectbox("Multiplier", [1, 2, 3])
-    
     pred_motm = st.text_input("Predicted MOTM")
     
     submit = st.form_submit_button("Submit Bet")
