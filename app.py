@@ -37,11 +37,13 @@ def sync_results(matches_df):
 try:
     matches_df = conn.read(worksheet="Matches", ttl="5m")
     leaderboard_df = conn.read(worksheet="Leaderboard", ttl=0).fillna('')
-    # Load bets and clean up 'nan' immediately
-    bets_df = conn.read(worksheet="Bets", ttl=0).fillna('')
+    # Load and clean bets
+    raw_bets = conn.read(worksheet="Bets", ttl=0)
+    bets_df = raw_bets.fillna('')
     
-    # Ensure MatchID is treated as a string for consistent comparison
-    bets_df['MatchID'] = bets_df['MatchID'].astype(str)
+    # Crucial: Ensure columns are strings and stripped of hidden spaces
+    bets_df['MatchID'] = bets_df['MatchID'].astype(str).str.strip()
+    bets_df['Player'] = bets_df['Player'].astype(str).str.strip()
 except Exception:
     st.error("Connection busy. Please refresh.")
     st.stop()
@@ -77,47 +79,49 @@ if not upcoming_df.empty:
 
     selected_match_display = st.sidebar.selectbox("Select Match", upcoming_df['display_name'].tolist(), index=default_index)
     
-    # Get the MatchID as a string to match the bets_df
-    match_id = str(upcoming_df[upcoming_df['display_name'] == selected_match_display]['MatchID'].values[0])
-    match_info = matches_df[matches_df['MatchID'].astype(str) == match_id].iloc[0]
+    # Get MatchID as clean string
+    match_id = str(upcoming_df[upcoming_df['display_name'] == selected_match_display]['MatchID'].values[0]).strip()
+    match_info = matches_df[matches_df['MatchID'].astype(str).str.strip() == match_id].iloc[0]
 
-    # --- CHECK FOR EXISTING BET ---
-    existing_bet = bets_df[(bets_df['Player'] == current_player) & (bets_df['MatchID'] == match_id)]
+    # --- THE FIX: Precise Filtering for Current Player + Selected Match ---
+    user_has_bet = bets_df[(bets_df['Player'] == current_player) & (bets_df['MatchID'] == match_id)]
 
-    if not existing_bet.empty:
-        bet_data = existing_bet.iloc[0]
-        st.sidebar.success(f"✅ Bet Locked for Match {match_id}")
+    if not user_has_bet.empty:
+        bet_data = user_has_bet.iloc[0]
+        st.sidebar.success(f"✅ {current_player}, your bet is locked.")
         st.sidebar.markdown(f"""
-        **Your Prediction Details:**
-        * **Team:** {bet_data['Predicted Team']}
+        **Your Prediction:**
+        * **Winner:** {bet_data['Predicted Team']}
         * **Multiplier:** x{bet_data['Multiplier']}
         * **MOTM:** {bet_data['Predicted MOTM']}
         """)
-        st.sidebar.warning("You cannot edit this bet.")
     else:
-        with st.sidebar.form("bet_form"):
-            st.write(f"Predicting: {match_info['Team 1']} vs {match_info['Team 2']}")
-            pred_team = st.radio("Who wins?", [match_info['Team 1'], match_info['Team 2']])
-            multiplier = st.selectbox("Select Multiplier", [1, 2, 3])
-            pred_motm = st.selectbox("Predict Man of the Match", player_list)
+        with st.sidebar.form("bet_form", clear_on_submit=True):
+            st.write(f"New Bet for {current_player}")
+            st.write(f"**{match_info['Team 1']} vs {match_info['Team 2']}**")
+            pred_team = st.radio("Pick Winner", [match_info['Team 1'], match_info['Team 2']])
+            multiplier = st.selectbox("Multiplier", [1, 2, 3])
+            pred_motm = st.selectbox("Man of the Match", player_list)
             submit = st.form_submit_button("Submit Prediction")
 
         if submit:
-            new_bet = pd.DataFrame([{
-                "Player": current_player, 
-                "MatchID": match_id, 
-                "Predicted Team": pred_team,
-                "Multiplier": multiplier, 
-                "Predicted MOTM": pred_motm
-            }])
-            updated_bets = pd.concat([bets_df, new_bet], ignore_index=True)
+            new_row = {
+                "Player": str(current_player), 
+                "MatchID": str(match_id), 
+                "Predicted Team": str(pred_team),
+                "Multiplier": int(multiplier), 
+                "Predicted MOTM": str(pred_motm)
+            }
+            new_bet_df = pd.DataFrame([new_row])
+            updated_bets = pd.concat([bets_df, new_bet_df], ignore_index=True)
+            
             conn.update(worksheet="Bets", data=updated_bets)
             st.sidebar.balloons()
             st.sidebar.success("Bet Placed!")
-            time.sleep(1)
+            time.sleep(1.5)
             st.rerun()
 else:
-    st.sidebar.info("No active matches to bet on.")
+    st.sidebar.info("No active matches.")
 
 # --- MAIN PAGE ---
 col1, col2 = st.columns([1, 1.2])
@@ -128,5 +132,5 @@ with col2:
     st.subheader("📅 Schedule")
     st.dataframe(matches_df[['MatchID', 'Date', 'Team 1', 'Team 2', 'Winner']], hide_index=True)
 
-st.subheader("📝 All Bets")
-st.dataframe(bets_df.tail(20), use_container_width=True, hide_index=True)
+st.subheader("📝 Recent Activity")
+st.dataframe(bets_df.tail(15), use_container_width=True, hide_index=True)
