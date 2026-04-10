@@ -13,7 +13,7 @@ st.markdown("""
     <style>
     .stApp { background-color: #000000; }
     
-    /* Header Section - No Gaps */
+    /* Header Section */
     .main-header {
         background: linear-gradient(90deg, #d32f2f 0%, #000000 100%);
         padding: 20px;
@@ -58,6 +58,9 @@ st.markdown("""
         width: 100%;
     }
     .stButton>button:hover { background: #ff5252; box-shadow: 0 0 10px #d32f2f; }
+    
+    /* Clean up form spacing */
+    .stForm { border: none !important; padding: 0 !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -100,15 +103,13 @@ bets_df = get_bets_live()
 st.markdown('<div class="main-header"><h1 style="color: white; margin: 0; font-family: Arial Black;">🏏 IPL FANTASY LEAGUE</h1></div>', unsafe_allow_html=True)
 
 with st.container():
-    c1, c2, c3 = st.columns([1.5, 1, 1])
+    c1, c2 = st.columns([2, 1])
     with c1:
         current_user = st.selectbox("PLAYER", ["S", "G", "T", "Shy", "Y", "D", "A"])
     with c2:
         user_score = leaderboard_df[leaderboard_df['Player'] == current_user]['Total'].values
-        st.metric("POINTS", f"{user_score[0] if len(user_score) > 0 else 0}")
-    with c3:
-        rank = leaderboard_df['Total'].rank(ascending=False, method='min').iloc[0] if not leaderboard_df.empty else "-"
-        st.metric("RANK", f"#{int(rank)}")
+        score_val = user_score[0] if len(user_score) > 0 else 0
+        st.metric("POINTS", f"{score_val}")
 
 st.divider()
 
@@ -146,33 +147,39 @@ with col_main:
                 """, unsafe_allow_html=True)
 
                 if is_locked:
-                    if has_bet: st.info(f"Your Prediction: {user_bet.iloc[0]['Predicted Team']} (x{user_bet.iloc[0]['Multiplier']})")
+                    if has_bet: 
+                        st.info(f"**Locked Bet:** {user_bet.iloc[0]['Predicted Team']} (x{user_bet.iloc[0]['Multiplier']})")
+                    else:
+                        st.warning("No bet was placed before lockout.")
                 else:
-                    with st.expander("PLACE BET", expanded=not has_bet):
-                        with st.form(f"form_{m_id}"):
-                            f1, f2 = st.columns(2)
-                            with f1:
-                                p_team = st.radio("Winner", [match['Team 1'], match['Team 2']], key=f"t_{m_id}")
-                                p_mult = st.select_slider("Multiplier", options=[1, 2, 3], key=f"m_{m_id}")
-                            with f2:
-                                p_names = sorted(players_df['Name'].tolist()) if not players_df.empty else ["N/A"]
-                                p_motm = st.selectbox("MOTM", p_names, key=f"p_{m_id}")
-                            if st.form_submit_button("SUBMIT"):
-                                ts = now_ist.strftime("%Y-%m-%d %H:%M:%S")
-                                live_bets = get_bets_live()
-                                mask = (live_bets['Player'] == current_user) & (live_bets['MatchID'] == m_id)
-                                if not live_bets[mask].empty:
-                                    tidx = live_bets[mask].index[0]
-                                    live_bets.loc[tidx, ['Predicted Team', 'Multiplier', 'Predicted MOTM', 'Timestamp']] = [p_team, p_mult, p_motm, ts]
-                                else:
-                                    new_row = pd.DataFrame([{"Player": current_user, "MatchID": m_id, "Predicted Team": p_team, "Multiplier": p_mult, "Predicted MOTM": p_motm, "Timestamp": ts}])
-                                    live_bets = pd.concat([live_bets, new_row], ignore_index=True)
-                                conn.update(worksheet="Bets", data=live_bets)
-                                st.cache_data.clear()
-                                st.rerun()
+                    # REMOVED EXPANDER - Form is now Always Visible
+                    with st.form(f"form_{m_id}"):
+                        f1, f2 = st.columns(2)
+                        with f1:
+                            p_team = st.radio("Winner", [match['Team 1'], match['Team 2']], key=f"t_{m_id}")
+                            p_mult = st.select_slider("Multiplier", options=[1, 2, 3], key=f"m_{m_id}")
+                        with f2:
+                            p_names = sorted(players_df['Name'].tolist()) if not players_df.empty else ["N/A"]
+                            p_motm = st.selectbox("MOTM", p_names, key=f"p_{m_id}")
+                        
+                        if st.form_submit_button("SUBMIT"):
+                            ts = now_ist.strftime("%Y-%m-%d %H:%M:%S")
+                            live_bets = get_bets_live()
+                            mask = (live_bets['Player'] == current_user) & (live_bets['MatchID'] == m_id)
+                            
+                            if not live_bets[mask].empty:
+                                tidx = live_bets[mask].index[0]
+                                live_bets.loc[tidx, ['Predicted Team', 'Multiplier', 'Predicted MOTM', 'Timestamp']] = [p_team, p_mult, p_motm, ts]
+                            else:
+                                new_row = pd.DataFrame([{"Player": current_user, "MatchID": m_id, "Predicted Team": p_team, "Multiplier": p_mult, "Predicted MOTM": p_motm, "Timestamp": ts}])
+                                live_bets = pd.concat([live_bets, new_row], ignore_index=True)
+                            
+                            conn.update(worksheet="Bets", data=live_bets)
+                            st.cache_data.clear()
+                            st.success("Saved!")
+                            st.rerun()
 
     with tab2:
-        # Show last 5 completed matches
         completed = matches_df[matches_df['Winner'] != ''].sort_values('MatchID', ascending=False).head(5)
         if completed.empty:
             st.write("No results recorded yet.")
