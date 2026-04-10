@@ -28,17 +28,21 @@ def get_leaderboard():
 @st.cache_data(ttl=600)
 def get_static_data():
     try:
-        # Fetching raw data
         m_df = conn.read(worksheet="Matches", ttl="10m").fillna('')
         p_df = conn.read(worksheet="Players", ttl="1h").fillna('')
         
-        # 1. Clean MatchID
         m_df['MatchID'] = m_df['MatchID'].astype(str).str.split('.').str[0].str.strip()
         
-        # 2. BULLETPROOF DATE CONVERSION
-        # We strip spaces and force conversion to ensure 2026-04-10 matches today's date
-        m_df['Date'] = m_df['Date'].astype(str).str.strip()
-        m_df['Date_Parsed'] = pd.to_datetime(m_df['Date'], errors='coerce').dt.date
+        # YEAR FIX: We parse the date and explicitly replace the year with 2026
+        def fix_date(date_str):
+            try:
+                parsed = pd.to_datetime(date_str)
+                # Force the year to 2026 to match the app system time
+                return parsed.replace(year=2026).date()
+            except:
+                return None
+
+        m_df['Date_Parsed'] = m_df['Date'].apply(fix_date)
         
         return m_df, p_df
     except Exception as e:
@@ -72,18 +76,15 @@ with col_main:
     player_list = ["S", "G", "T", "Shy", "Y", "D", "A"]
     current_user = st.selectbox("Identify Yourself", player_list)
     
-    # Get current IST date
     now_ist = datetime.now(ist)
     today_date = now_ist.date()
     
-    # DEBUG: Show what the app is seeing
+    # Updated Debugger to verify the fix
     with st.expander("🛠 Debugging Information"):
-        st.write(f"App thinks Today is: {today_date}")
+        st.write(f"App Date: {today_date}")
         if not matches_df.empty:
-            st.write("First 3 Dates in Sheet (Parsed):", matches_df['Date_Parsed'].head(3).tolist())
-            st.write("Total Matches Found in Sheet:", len(matches_df))
+            st.write("Fixed Dates in Sheet:", matches_df['Date_Parsed'].head(3).tolist())
 
-    # Filter matches
     todays_matches = matches_df[matches_df['Date_Parsed'] == today_date].sort_values('MatchID')
     
     if todays_matches.empty:
@@ -92,13 +93,8 @@ with col_main:
         for i, (idx, match) in enumerate(todays_matches.iterrows()):
             m_id = str(match['MatchID']).strip()
             
-            # --- DYNAMIC LOCKOUT LOGIC ---
-            # Double Header: 1st game at 3:30 PM, 2nd at 7:30 PM. Single games: 7:30 PM.
-            if len(todays_matches) > 1:
-                match_time = dt_time(15, 30) if i == 0 else dt_time(19, 30)
-            else:
-                match_time = dt_time(19, 30)
-                
+            # Lockout logic: 3:30 PM for 1st of two, 7:30 PM otherwise
+            match_time = dt_time(15, 30) if (len(todays_matches) > 1 and i == 0) else dt_time(19, 30)
             is_locked = now_ist.time() >= match_time
             
             user_bet = bets_df[(bets_df['Player'] == current_user) & (bets_df['MatchID'] == m_id)]
@@ -146,5 +142,5 @@ with col_main:
                             st.rerun()
 
 st.divider()
-st.subheader("📋 Upcoming")
+st.subheader("📋 Upcoming Schedule")
 st.dataframe(matches_df[['MatchID', 'Date', 'Team 1', 'Team 2']].head(10), hide_index=True)
