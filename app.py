@@ -8,15 +8,63 @@ import time
 st.set_page_config(page_title="IPL Betting Hub", layout="wide")
 ist = pytz.timezone('Asia/Kolkata')
 
-# --- UI STYLING ---
+# --- MODERN UI STYLING ---
 st.markdown("""
     <style>
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #1E88E5; color: white; }
-    .match-box { border: 2px solid #e0e0e0; padding: 20px; border-radius: 12px; background-color: #ffffff; margin-bottom: 15px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); }
+    /* Main Background */
+    .stApp {
+        background-color: #0e1117;
+    }
+    
+    /* Match Card Styling */
+    .match-card {
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border: 1px solid #334155;
+        padding: 25px;
+        border-radius: 15px;
+        margin-bottom: 20px;
+        color: white;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    }
+    
+    .match-header {
+        color: #94a3b8;
+        font-size: 0.8em;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        margin-bottom: 10px;
+    }
+    
+    .vs-text {
+        color: #38bdf8;
+        font-weight: bold;
+        padding: 0 10px;
+    }
+    
+    /* Metrics / Leaderboard Styling */
+    [data-testid="stMetricValue"] {
+        color: #38bdf8;
+    }
+    
+    /* Buttons */
+    .stButton>button {
+        width: 100%;
+        border-radius: 10px;
+        border: none;
+        height: 3em;
+        background-color: #38bdf8;
+        color: #0f172a;
+        font-weight: bold;
+        transition: 0.3s;
+    }
+    .stButton>button:hover {
+        background-color: #7dd3fc;
+        transform: translateY(-2px);
+    }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🏏 IPL Betting Dashboard")
+st.title("🏏 IPL Fantasy Hub")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -30,23 +78,19 @@ def get_static_data():
     try:
         m_df = conn.read(worksheet="Matches", ttl="10m").fillna('')
         p_df = conn.read(worksheet="Players", ttl="1h").fillna('')
-        
         m_df['MatchID'] = m_df['MatchID'].astype(str).str.split('.').str[0].str.strip()
         
-        # YEAR FIX: We parse the date and explicitly replace the year with 2026
+        # Consistent Date Parsing for 2026
         def fix_date(date_str):
             try:
                 parsed = pd.to_datetime(date_str)
-                # Force the year to 2026 to match the app system time
                 return parsed.replace(year=2026).date()
-            except:
-                return None
-
+            except: return None
+            
         m_df['Date_Parsed'] = m_df['Date'].apply(fix_date)
-        
         return m_df, p_df
     except Exception as e:
-        st.error(f"Data Load Error: {e}")
+        st.error(f"Load Error: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
 def get_bets_live():
@@ -55,7 +99,6 @@ def get_bets_live():
         if not b_df.empty:
             b_df['MatchID'] = b_df['MatchID'].astype(str).str.split('.').str[0].str.strip()
             b_df['Player'] = b_df['Player'].astype(str).str.strip()
-            if 'EditCount' not in b_df.columns: b_df['EditCount'] = 0
             b_df['EditCount'] = pd.to_numeric(b_df['EditCount'], errors='coerce').fillna(0).astype(int)
         return b_df
     except:
@@ -65,64 +108,69 @@ matches_df, players_df = get_static_data()
 leaderboard_df = get_leaderboard()
 bets_df = get_bets_live()
 
-# --- 2. USER INTERFACE ---
-col_main, col_side = st.columns([2, 1])
+# --- 2. LAYOUT ---
+col_main, col_side = st.columns([2.2, 1])
 
 with col_side:
-    st.subheader("🏆 Leaderboard")
-    st.table(leaderboard_df[['Player', 'Total']])
+    st.markdown("### 🏆 Standings")
+    # Pretty Leaderboard
+    styled_leaderboard = leaderboard_df[['Player', 'Total']].sort_values(by='Total', ascending=False)
+    st.dataframe(styled_leaderboard, hide_index=True, use_container_width=True)
+    
+    st.markdown("---")
+    current_user = st.selectbox("Switch User Profile", ["S", "G", "T", "Shy", "Y", "D", "A"])
 
 with col_main:
-    player_list = ["S", "G", "T", "Shy", "Y", "D", "A"]
-    current_user = st.selectbox("Identify Yourself", player_list)
-    
     now_ist = datetime.now(ist)
     today_date = now_ist.date()
     
-    # Updated Debugger to verify the fix
-    with st.expander("🛠 Debugging Information"):
-        st.write(f"App Date: {today_date}")
-        if not matches_df.empty:
-            st.write("Fixed Dates in Sheet:", matches_df['Date_Parsed'].head(3).tolist())
-
     todays_matches = matches_df[matches_df['Date_Parsed'] == today_date].sort_values('MatchID')
     
     if todays_matches.empty:
-        st.warning(f"No matches found for {today_date}. Check 'Matches' sheet formatting.")
+        st.info(f"📅 No matches scheduled for today ({today_date.strftime('%d %b')})")
     else:
         for i, (idx, match) in enumerate(todays_matches.iterrows()):
             m_id = str(match['MatchID']).strip()
             
-            # Lockout logic: 3:30 PM for 1st of two, 7:30 PM otherwise
+            # Dynamic Lockout
             match_time = dt_time(15, 30) if (len(todays_matches) > 1 and i == 0) else dt_time(19, 30)
             is_locked = now_ist.time() >= match_time
             
+            # User Prediction Status
             user_bet = bets_df[(bets_df['Player'] == current_user) & (bets_df['MatchID'] == m_id)]
             has_bet = not user_bet.empty and str(user_bet.iloc[0]['Predicted Team']).strip() != ""
             
+            # Match Card UI
             st.markdown(f"""
-            <div class="match-box">
-                <h2 style='margin: 0;'>Match {m_id}: {match['Team 1']} vs {match['Team 2']}</h2>
-                <p style='color: #555;'>🕒 Lockout: <b>{match_time.strftime('%I:%M %p')} IST</b></p>
-            </div>
+                <div class="match-card">
+                    <div class="match-header">Match {m_id} • {match['Venue']}</div>
+                    <div style="font-size: 1.8em; font-weight: 800; margin: 10px 0;">
+                        {match['Team 1']} <span class="vs-text">VS</span> {match['Team 2']}
+                    </div>
+                    <div style="color: #94a3b8; font-size: 0.9em;">
+                        🕒 Lockout: {match_time.strftime('%I:%M %p')} IST
+                    </div>
+                </div>
             """, unsafe_allow_html=True)
 
             if is_locked:
-                st.error("🔒 Betting closed.")
+                st.warning("🚫 Betting is now closed for this match.")
+                if has_bet:
+                    st.info(f"**Your Prediction:** {user_bet.iloc[0]['Predicted Team']} (x{user_bet.iloc[0]['Multiplier']})")
             elif has_bet and user_bet.iloc[0]['EditCount'] >= 2:
-                st.success(f"✅ Locked: {user_bet.iloc[0]['Predicted Team']} (x{user_bet.iloc[0]['Multiplier']})")
+                st.success(f"🔒 Final Prediction: {user_bet.iloc[0]['Predicted Team']} (x{user_bet.iloc[0]['Multiplier']})")
             else:
-                with st.expander("📝 Place/Edit Bet"):
+                with st.expander("📝 Make Your Move", expanded=not has_bet):
                     with st.form(f"form_{m_id}"):
                         c1, c2 = st.columns(2)
                         with c1:
-                            p_team = st.radio("Winner", [match['Team 1'], match['Team 2']], key=f"t_{m_id}")
-                            p_mult = st.select_slider("Multiplier", options=[1, 2, 3], key=f"m_{m_id}")
+                            p_team = st.radio("Winner Pick", [match['Team 1'], match['Team 2']], key=f"t_{m_id}")
+                            p_mult = st.select_slider("Point Multiplier", options=[1, 2, 3], key=f"m_{m_id}")
                         with c2:
                             p_names = sorted(players_df['Name'].tolist()) if not players_df.empty else ["N/A"]
-                            p_motm = st.selectbox("MOTM", p_names, key=f"p_{m_id}")
+                            p_motm = st.selectbox("MOTM Prediction", p_names, key=f"p_{m_id}")
                         
-                        if st.form_submit_button("Confirm Bet"):
+                        if st.form_submit_button("Submit Prediction"):
                             live_bets = get_bets_live()
                             mask = (live_bets['Player'] == current_user) & (live_bets['MatchID'] == m_id)
                             
@@ -139,8 +187,10 @@ with col_main:
                             
                             conn.update(worksheet="Bets", data=live_bets)
                             st.cache_data.clear()
+                            st.balloons()
+                            time.sleep(1)
                             st.rerun()
 
 st.divider()
-st.subheader("📋 Upcoming Schedule")
-st.dataframe(matches_df[['MatchID', 'Date', 'Team 1', 'Team 2']].head(10), hide_index=True)
+with st.expander("📅 View Season Schedule"):
+    st.dataframe(matches_df[['MatchID', 'Date', 'Team 1', 'Team 2', 'Venue']].head(20), hide_index=True)
